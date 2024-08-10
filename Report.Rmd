@@ -1,0 +1,236 @@
+---
+title: "projekt2"
+author: "Denys Vitiuk"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+Celem zadania jest statystyczna analiza danych znajdujących się w pilkach,ktorych można znaleźć na Moodle
+
+Zacznimy z tego,że otworzymy biblioteky,ktory pomaga z projektom
+```{r}
+library(readr)
+library(glmnet)
+library(randomForest)
+library(xgboost)
+```
+
+#Dlatego,żeby analiza miała sens trzeba otworzyć dataset.Coś,zrobimy tego
+```{r}
+y_train <- read.csv("y_train.csv")
+X_train <- read.csv("X_train.csv")
+# Wczytanie danych testowych
+test_X <- read.csv("X_test.csv")
+```
+
+#1.Eksploracja
+#a) Sprawdzimy liczby obserwacji i zmiennych
+```{r}
+train_obs <- nrow(X_train)  # liczba obserwacji
+train_vars <- ncol(X_train)  # liczba zmiennych
+```
+
+# a potem wyświetlimy wyników:
+```{r}
+cat("Liczba obserwacji w danych treningowych:", train_obs, "\n")
+cat("Liczba zmiennych w danych treningowych:", train_vars, "\n")
+```
+
+# Sprawdzenie typów zmiennych
+```{r}
+str(y_train)
+str(X_train)
+```
+
+
+```{r}
+# Konwersja zmiennej objaśnianej na typ liczbowy
+train_y <- as.numeric(as.character(y_train$Expected))
+
+# Sprawdzenie typu zmiennej po konwersji
+str(train_y)
+
+# Zbadanie rozkładu empirycznego zmiennej objaśnianej (train_y)
+summary(train_y)
+hist(train_y, main = "Histogram zmiennej objaśnianej", xlab = "Wartość", ylab = "Częstość")
+plot(density(train_y), main = "Wykres estymatora gęstości zmiennej objaśnianej", xlab = "Wartość", ylab = "Gęstość")
+#pytanie
+# Wybór 250 zmiennych objaśniających najbardziej skorelowanych
+s<-sort(abs(cor(train_X, train_y)),decreasing = TRUE,index.return=TRUE)
+
+ind=s$ix[1:250]
+heatmap(as.matrix(train_X[,ind]))
+```
+Przetworzymy naszy zmienny:
+```{r}
+x<-as.numeric(unlist(X_train))
+y<-as.numeric(unlist(y_train))
+```
+# Definicja siatki hiperparametrów
+```{r}
+alpha_values <- c(0, 0.25, 0.5, 0.75, 1)
+lambda_values <- c(0.001, 0.01, 0.1, 1, 10)
+```
+```{r}
+# Liczba podzbiorów w walidacji krzyżowej
+num_folds <- 5
+```
+# Inicjalizacja wektorów do przechowywania błędów treningowych i walidacyjnych
+```{r}
+train_errors <- vector("numeric", length(alpha_values) * length(lambda_values))
+valid_errors <- vector("numeric", length(alpha_values) * length(lambda_values))
+```
+```{r}
+# Indeksy podziału danych do walidacji krzyżowej
+fold_indices <- cut(seq(1, nrow(x)), breaks = num_folds, labels = FALSE)
+```
+# Pętla wykonująca walidację krzyżową dla różnych konfiguracji hiperparametrów
+```{r}
+for (alpha in alpha_values) {
+  for (lambda in lambda_values) {
+    # Pętla walidacji krzyżowej
+    for (fold in 1:num_folds) {
+      # Podział danych na część treningową i walidacyjną
+      train_indices <- which(fold_indices != fold)
+      valid_indices <- which(fold_indices == fold)
+      
+      X_train_fold <- x[train_indices, ]
+      y_train_fold <- y[train_indices, ]
+      X_valid_fold <- x[valid_indices, ]
+      y_valid_fold <- y[valid_indices, ]
+      
+      # Trenowanie modelu ElasticNet
+      model <- glmnet(X_train_fold, y_train_fold, alpha = alpha, lambda = lambda)
+      
+      # Predykcja na danych treningowych i walidacyjnych
+      y_train_pred <- predict(model, newx = X_train_fold)
+      y_valid_pred <- predict(model, newx = X_valid_fold)
+      
+      # Obliczenie błędu treningowego i walidacyjnego
+      train_error <- mean((y_train_fold - y_train_pred)^2)
+      valid_error <- mean((y_valid_fold - y_valid_pred)^2)
+      
+      # Zapisanie błędu do wektorów
+      index <- (alpha_values == alpha) * length(lambda_values) + (lambda_values == lambda)
+      train_errors[index] <- train_errors[index] + train_error
+      valid_errors[index] <- valid_errors[index] + valid_error
+    }
+  }
+}
+
+# Uśrednienie błędów treningowych i walidacyjnych
+train_errors <- train_errors / num_folds
+valid_errors <- valid_errors / num_folds
+
+# Wyświetlenie wyników
+results <- data.frame(Alpha = rep(alpha_values, length(lambda_values)), 
+                      Lambda = rep(lambda_values, each = length(alpha_values)), 
+                      Train_Error = train_errors, 
+                      Valid_Error = valid_errors)
+print(results)
+```
+
+
+```{r}
+# Siatka hyperparametrow
+ntree_values <- c(100, 200, 300)
+mtry_values <- c(5, 10, 15)
+max_depth_values <- c(5, 10, 15)
+```
+```{r}
+# Create empty vectors to store results
+rf_train_errors <- matrix(0, nrow = length(ntree_values), ncol = length(mtry_values), dimnames = list(ntree_values, mtry_values))
+rf_valid_errors <- matrix(0, nrow = length(ntree_values), ncol = length(mtry_values), dimnames = list(ntree_values, mtry_values))
+```
+
+```{r}
+# Cross-validation loop
+for (fold in 1:num_folds) {
+  # Split the data into training and validation sets
+  train_indices <- which(fold_indices != fold)
+  valid_indices <- which(fold_indices == fold)
+  X_train_fold <- x[train_indices, ]
+  y_train_fold <- y[train_indices]
+  X_valid_fold <- x[valid_indices, ]
+  y_valid_fold <- y[valid_indices]
+  
+  # Random Forest model training and evaluation
+  for (ntree in ntree_values) {
+    for (mtry in mtry_values) {
+      for (max_depth in max_depth_values) {
+        # Train the model
+        model <- randomForest(X_train_fold, y_train_fold, ntree = ntree, mtry = mtry, max_depth = max_depth)
+        
+        # Predict on training and validation sets
+        y_train_pred <- predict(model, X_train_fold)
+        y_valid_pred <- predict(model, X_valid_fold)
+        
+        # Calculate errors
+        train_error <- mean((y_train_fold - y_train_pred)^2)
+        valid_error <- mean((y_valid_fold - y_valid_pred)^2)
+        
+        # Store errors in the respective grid position
+        rf_train_errors[ntree, mtry] <- rf_train_errors[ntree, mtry] + train_error
+        rf_valid_errors[ntree, mtry] <- rf_valid_errors[ntree, mtry] + valid_error
+      }
+    }
+  }
+}
+```
+```{r}
+# Calculate average errors across folds
+rf_train_errors <- rf_train_errors / num_folds
+rf_valid_errors <- rf_valid_errors / num_folds
+
+# Tabular summary
+summary_table <- data.frame(ntree = rep(ntree_values, length(mtry_values)),
+                            mtry = rep(mtry_values, each = length(ntree_values)),
+                            train_error = as.vector(rf_train_errors),
+                            valid_error = as.vector(rf_valid_errors))
+
+# Reference model
+reference_train_error <- mean((train_y - mean(train_y))^2)
+reference_valid_error <- mean((valid_y - mean(train_y))^2)
+
+reference_row <- data.frame(ntree = "Reference", mtry = "Reference",
+                            train_error = reference_train_error, valid_error = reference_valid_error)
+
+summary_table <- rbind(summary_table, reference_row)
+
+summary_table
+```
+
+```{r}
+
+train_X <- as.matrix(train_X[, ind])  # Wybór zmiennych objaśniających
+train_y <- as.numeric(as.character(train_y$Expected))
+test_X <- as.matrix(test_X[, ind])    # Wybór zmiennych objaśniających
+
+# Tworzenie obiektu DMatrix dla danych treningowych
+dtrain <- xgb.DMatrix(data = train_X, label = train_y)
+
+# Tworzenie obiektu DMatrix dla danych testowych
+dtest <- xgb.DMatrix(data = test_X)
+
+# Definicja parametrów modelu
+params <- list(
+  objective = "reg:squarederror",  # Funkcja straty dla problemu regresji
+  max_depth = 6,                   # Maksymalna głębokość drzewa
+  eta = 0.1,                       # Współczynnik uczenia
+  nrounds = 100                    # Liczba rund (iteracji)
+)
+
+# Trenowanie modelu XGBoost
+model <- xgb.train(params = params, data = dtrain,nrounds = params$nrounds)
+
+# Predykcja na zbiorze testowym
+predictions <- predict(model, dtest)
+
+# Wygenerowanie pliku z predykcjami
+output <- data.frame(ID = 1:length(predictions), Target = predictions)
+write.csv(output, file = "predictions.csv", row.names = FALSE)
+
+```
+
