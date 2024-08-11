@@ -24,6 +24,6 @@ Recommendations:
 
 2. Optimization of Parallel Algorithms:Continued development and optimization of parallel computing algorithms are suggested to fully exploit the capabilities of GPUs.
 
-3. Practical Applications:The author suggests applying the method to real-world problems in mathematical physics and other fields where large-scale simulations are required.
+3. Practical Applications:I suggest applying the method to real-world problems in mathematical physics and other fields where large-scale simulations are required.
 
 This thesis demonstrates a promising approach to overcoming the limitations of traditional computational methods for solving PDEs, particularly by harnessing the power of modern GPUs for parallel computation.
